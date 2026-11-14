@@ -30,6 +30,7 @@ def test_generator_creates_full_support_scaffold(tmp_path):
         "snippets/mylang.json",
         "syntaxes/mylang.tmLanguage.json",
         "client/extension.ts",
+        "client/extension.js",
         "server/server.py",
         ".vscode/launch.json",
         ".vscode/tasks.json",

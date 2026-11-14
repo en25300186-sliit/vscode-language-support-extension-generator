@@ -197,6 +197,7 @@ class VscodeExtensionBuilder:
 
         if resolved_features.include_lsp:
             self._write_client_extension_ts(target / "client" / "extension.ts")
+            self._write_client_extension_js(target / "client" / "extension.js")
             self._write_server_stub(target / "server" / "server.py")
 
         if resolved_features.include_debug_configuration:
@@ -572,6 +573,36 @@ export function deactivate() {{
   serverProcess?.kill();
 }}
 '''
+        self._write_text(path, content)
+
+    def _write_client_extension_js(self, path: Path) -> None:
+        content = f'''const path = require("path");
+const cp = require("child_process");
+
+let serverProcess;
+
+function activate(context) {{
+  const startServer = () => {{
+    const serverPath = path.join(context.extensionPath, "server", "server.py");
+    serverProcess = cp.spawn("python", [serverPath], {{ stdio: "pipe" }});
+  }};
+
+  startServer();
+
+  const restart = vscode.commands.registerCommand("{self.spec.extension_name}.restartLanguageServer", () => {{
+    if (serverProcess) serverProcess.kill();
+    startServer();
+  }});
+  context.subscriptions.push(restart);
+}}
+
+function deactivate() {{
+  if (serverProcess) serverProcess.kill();
+}}
+
+module.exports = {{ activate, deactivate }};
+'''
+        content = 'const vscode = require("vscode");\n' + content
         self._write_text(path, content)
 
     def _write_server_stub(self, path: Path) -> None:

@@ -197,6 +197,7 @@ fully configurable in `language.py`.
 | `snippets/<id>.json` | VS Code snippets |
 | `server/server.py` | Dependency-free Python LSP |
 | `client/extension.ts` | VS Code client process launcher |
+| `client/extension.js` | Ready-to-run CommonJS client launcher |
 | `.vscode/launch.json` | Debug configuration placeholder |
 | `.vscode/tasks.json` | Run/test task placeholders |
 
