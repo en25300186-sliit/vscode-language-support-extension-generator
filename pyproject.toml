@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vscode-language-support-extension-generator"
+version = "0.1.0"
+description = "Python generator for full-featured VS Code language support extensions"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "Copilot Coding Agent" }]
+keywords = ["vscode", "language-server", "generator", "extension"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+
+[project.scripts]
+vscode-extgen = "vscode_language_support_extension_generator.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
