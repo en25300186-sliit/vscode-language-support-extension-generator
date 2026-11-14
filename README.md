@@ -82,6 +82,28 @@ vscode-extgen \
 The CLI is useful for bootstrapping. The generated `language.py` is the
 recommended interface when a language needs richer declarations.
 
+### Simple comment colors
+
+For a language where comments start with `#`, use these real `LanguageSpec`
+options:
+
+```python
+language = LanguageSpec(
+    language_id="mylang",
+    display_name="MyLang",
+    publisher="acme",
+    extension_name="mylang-support",
+    line_comment="#",
+    comment_color="#6A9955",
+    comment_font_style="italic",
+)
+```
+
+The generator creates the `#` comment rule, `Ctrl+/` comment configuration,
+`themes/mylang-color-theme.json`, and the corresponding `package.json` theme
+contribution. The generated theme colors comments without requiring users to
+configure their own VS Code theme.
+
 ## Declarative editing
 
 `LanguageSpec` configures:
@@ -197,6 +219,7 @@ fully configurable in `language.py`.
 | `snippets/<id>.json` | VS Code snippets |
 | `server/server.py` | Dependency-free Python LSP |
 | `client/extension.ts` | VS Code client process launcher |
+| `client/extension.js` | Ready-to-run CommonJS client launcher |
 | `.vscode/launch.json` | Debug configuration placeholder |
 | `.vscode/tasks.json` | Run/test task placeholders |
 

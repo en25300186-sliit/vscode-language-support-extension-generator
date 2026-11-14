@@ -29,7 +29,9 @@ def test_generator_creates_full_support_scaffold(tmp_path):
         "language-configuration.json",
         "snippets/mylang.json",
         "syntaxes/mylang.tmLanguage.json",
+        "themes/mylang-color-theme.json",
         "client/extension.ts",
+        "client/extension.js",
         "server/server.py",
         ".vscode/launch.json",
         ".vscode/tasks.json",
@@ -71,6 +73,28 @@ def test_declarative_editing_uses_language_spec(tmp_path):
     assert grammar["repository"]["comments"]["patterns"][1]["name"] == "comment.block"
     assert configuration["comments"]["lineComment"] == "//"
     assert snippets["Match"]["prefix"] == "match"
+
+
+def test_simple_comment_color_api_generates_theme_and_starting_comment_rule(tmp_path):
+    spec = LanguageSpec(
+        language_id="hashlang",
+        display_name="HashLang",
+        publisher="acme",
+        extension_name="hashlang-support",
+        line_comment="#",
+        comment_color="#6A9955",
+        comment_font_style="italic",
+    )
+
+    target = VscodeExtensionBuilder(spec).generate(tmp_path / "hashlang")
+    grammar = json.loads((target / "syntaxes/hashlang.tmLanguage.json").read_text(encoding="utf-8"))
+    theme = json.loads((target / "themes/hashlang-color-theme.json").read_text(encoding="utf-8"))
+    package = json.loads((target / "package.json").read_text(encoding="utf-8"))
+
+    comment = grammar["repository"]["comments"]["patterns"][0]
+    assert comment["match"] == r"^\s*\#.*$"
+    assert theme["tokenColors"][0]["settings"] == {"foreground": "#6A9955", "fontStyle": "italic"}
+    assert package["contributes"]["themes"][0]["path"] == "./themes/hashlang-color-theme.json"
 
 
 def test_generate_extension_function_api(tmp_path):

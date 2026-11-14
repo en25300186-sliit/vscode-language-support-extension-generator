@@ -83,9 +83,12 @@ class LanguageSpec:
     publisher: str
     extension_name: str
     file_extensions: tuple[str, ...] = (".txt",)
+    line_comment: str | None = None
     single_line_comment: str = "//"
     block_comment_start: str = "/*"
     block_comment_end: str = "*/"
+    comment_color: str = "#6A9955"
+    comment_font_style: str = "italic"
     aliases: tuple[str, ...] = field(default_factory=tuple)
     keywords: tuple[str, ...] = (
         "if",
@@ -188,6 +191,10 @@ class VscodeExtensionBuilder:
                 target / "syntaxes" / f"{self.spec.language_id}.tmLanguage.json",
                 self._grammar_template(),
             )
+            self._write_json(
+                target / "themes" / f"{self.spec.language_id}-color-theme.json",
+                self._theme_template(),
+            )
 
         if resolved_features.include_snippets:
             self._write_json(
@@ -197,6 +204,7 @@ class VscodeExtensionBuilder:
 
         if resolved_features.include_lsp:
             self._write_client_extension_ts(target / "client" / "extension.ts")
+            self._write_client_extension_js(target / "client" / "extension.js")
             self._write_server_stub(target / "server" / "server.py")
 
         if resolved_features.include_debug_configuration:
@@ -246,6 +254,13 @@ class VscodeExtensionBuilder:
                     {
                         "language": language_id,
                         "path": f"./snippets/{language_id}.json",
+                    }
+                ],
+                "themes": [
+                    {
+                        "label": f"{self.spec.display_name} Colors",
+                        "uiTheme": "vs-dark",
+                        "path": f"./themes/{language_id}-color-theme.json",
                     }
                 ],
                 "configurationDefaults": {
@@ -310,6 +325,7 @@ class VscodeExtensionBuilder:
                 "server",
                 "syntaxes",
                 "snippets",
+                "themes",
                 "language.py",
                 "language-configuration.json",
                 ".vscode",
@@ -340,7 +356,7 @@ class VscodeExtensionBuilder:
         surrounding = self.spec.surrounding_pairs or auto_closing
         return {
             "comments": {
-                "lineComment": self.spec.single_line_comment,
+                "lineComment": self._line_comment(),
                 "blockComment": [self.spec.block_comment_start, self.spec.block_comment_end],
             },
             "brackets": [list(pair) for pair in self.spec.brackets],
@@ -425,8 +441,8 @@ class VscodeExtensionBuilder:
                 "comments": {
                     "patterns": [
                         {
-                            "name": "comment.line",
-                            "match": rf"{re.escape(self.spec.single_line_comment)}.*$",
+                            "name": f"comment.line.{self.spec.language_id}",
+                            "match": rf"^\s*{re.escape(self._line_comment())}.*$",
                         },
                         {
                             "name": "comment.block",
@@ -437,6 +453,24 @@ class VscodeExtensionBuilder:
                 },
             },
         }
+
+    def _theme_template(self) -> dict[str, Any]:
+        return {
+            "name": f"{self.spec.display_name} Colors",
+            "colors": {},
+            "tokenColors": [
+                {
+                    "scope": [f"comment.line.{self.spec.language_id}", "comment.block"],
+                    "settings": {
+                        "foreground": self.spec.comment_color,
+                        "fontStyle": self.spec.comment_font_style,
+                    },
+                }
+            ],
+        }
+
+    def _line_comment(self) -> str:
+        return self.spec.line_comment if self.spec.line_comment is not None else self.spec.single_line_comment
 
     def _snippet_template(self) -> dict[str, Any]:
         snippets = self.spec.snippets or (
@@ -485,9 +519,12 @@ language = LanguageSpec(
     extension_name={self.spec.extension_name!r},
     file_extensions={self.spec.file_extensions!r},
     aliases={self.spec.aliases!r},
+    line_comment={self._line_comment()!r},
     single_line_comment={self.spec.single_line_comment!r},
     block_comment_start={self.spec.block_comment_start!r},
     block_comment_end={self.spec.block_comment_end!r},
+    comment_color={self.spec.comment_color!r},
+    comment_font_style={self.spec.comment_font_style!r},
     # Add your language's words and operators here.
     keywords={self.spec.keywords!r},
     literals={self.spec.literals!r},
@@ -572,6 +609,36 @@ export function deactivate() {{
   serverProcess?.kill();
 }}
 '''
+        self._write_text(path, content)
+
+    def _write_client_extension_js(self, path: Path) -> None:
+        content = f'''const path = require("path");
+const cp = require("child_process");
+
+let serverProcess;
+
+function activate(context) {{
+  const startServer = () => {{
+    const serverPath = path.join(context.extensionPath, "server", "server.py");
+    serverProcess = cp.spawn("python", [serverPath], {{ stdio: "pipe" }});
+  }};
+
+  startServer();
+
+  const restart = vscode.commands.registerCommand("{self.spec.extension_name}.restartLanguageServer", () => {{
+    if (serverProcess) serverProcess.kill();
+    startServer();
+  }});
+  context.subscriptions.push(restart);
+}}
+
+function deactivate() {{
+  if (serverProcess) serverProcess.kill();
+}}
+
+module.exports = {{ activate, deactivate }};
+'''
+        content = 'const vscode = require("vscode");\n' + content
         self._write_text(path, content)
 
     def _write_server_stub(self, path: Path) -> None:
