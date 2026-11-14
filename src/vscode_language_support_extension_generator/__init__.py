@@ -5,6 +5,8 @@ from .core import (
     FeatureMeta,
     FeatureSet,
     LanguageSpec,
+    Snippet,
+    Symbol,
     VscodeExtensionBuilder,
     generate_extension,
 )
@@ -14,6 +16,8 @@ __all__ = [
     "FeatureMeta",
     "FeatureSet",
     "LanguageSpec",
+    "Snippet",
+    "Symbol",
     "VscodeExtensionBuilder",
     "generate_extension",
 ]
