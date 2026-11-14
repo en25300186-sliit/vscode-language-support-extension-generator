@@ -109,6 +109,7 @@ class LanguageSpec:
     folding_end_marker: str = r"^\s*#endregion\b"
     snippets: tuple["Snippet", ...] = ()
     symbols: tuple["Symbol", ...] = ()
+    embedded_languages: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -360,6 +361,7 @@ class VscodeExtensionBuilder:
         return {
             "name": self.spec.display_name,
             "scopeName": scope_name,
+            "embeddedLanguages": dict(self.spec.embedded_languages),
             "patterns": [
                 {"include": "#comments"},
                 {"include": "#strings"},
@@ -496,6 +498,7 @@ language = LanguageSpec(
     folding_end_marker={self.spec.folding_end_marker!r},
     snippets={self.spec.snippets!r},
     symbols={self.spec.symbols!r},
+    embedded_languages={self.spec.embedded_languages!r},
 )
 
 
@@ -589,6 +592,7 @@ except ImportError:
     language = None
 
 documents: dict[str, str] = {}
+workspace_root: Path | None = None
 word_pattern = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 declaration_pattern = re.compile(
     r"\\b(?:let|var|const|def|function|class|type|interface|enum)\\s+([A-Za-z_][A-Za-z0-9_]*)"
@@ -698,11 +702,84 @@ def publish_diagnostics(uri: str, text: str) -> None:
     send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": uri, "diagnostics": diagnostics(uri, text)}})
 
 
+def lsp_symbol_kind(kind: str) -> int:
+    return {"file": 1, "module": 2, "namespace": 3, "class": 5, "method": 6, "function": 12, "variable": 13, "constant": 14, "string": 15, "number": 16, "type": 22}.get(kind, 13)
+
+
+def line_position(text: str, offset: int) -> dict[str, int]:
+    before = text[:offset]
+    return {"line": before.count("\\n"), "character": offset - before.rfind("\\n") - 1}
+
+
+def symbol_location(uri: str, text: str, name: str) -> dict[str, Any] | None:
+    match = re.search(r"\\b" + re.escape(name) + r"\\b", text)
+    if not match:
+        return None
+    return {"uri": uri, "range": {"start": line_position(text, match.start()), "end": line_position(text, match.end())}}
+
+
+def files_in_workspace() -> dict[str, str]:
+    result = dict(documents)
+    if workspace_root and workspace_root.exists():
+        extensions = tuple(getattr(language, "file_extensions", ()))
+        for path in workspace_root.rglob("*"):
+            if path.is_file() and (not extensions or path.suffix in extensions):
+                uri = path.as_uri()
+                try:
+                    result.setdefault(uri, path.read_text(encoding="utf-8"))
+                except (OSError, UnicodeDecodeError):
+                    continue
+    return result
+
+
+def all_symbols() -> dict[str, list[dict[str, Any]]]:
+    result: dict[str, list[dict[str, Any]]] = {}
+    for uri, text in files_in_workspace().items():
+        for name, item in document_symbols(text).items():
+            result.setdefault(name, []).append({"uri": uri, "text": text, "item": item})
+    return result
+
+
+def full_document_range(text: str) -> dict[str, dict[str, int]]:
+    lines = text.splitlines()
+    return {"start": {"line": 0, "character": 0}, "end": {"line": len(lines), "character": len(lines[-1]) if lines else 0}}
+
+
+def format_document(text: str) -> str:
+    lines = [line.rstrip() for line in text.splitlines()]
+    while lines and not lines[-1]:
+        lines.pop()
+    return "\\n".join(lines) + ("\\n" if lines else "")
+
+
+def code_actions(uri: str, text: str) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    for match in re.finditer(r"\\b(TODO|FIXME)\\b[^\\n]*", text):
+        actions.append({
+            "title": f"Remove {match.group(1)} marker",
+            "kind": "quickfix",
+            "edit": {"changes": {uri: [{"range": {"start": line_position(text, match.start()), "end": line_position(text, match.end())}, "newText": ""}]}},
+        })
+    return actions
+
+
+def call_hierarchy_item(uri: str, text: str, name: str) -> dict[str, Any] | None:
+    location = symbol_location(uri, text, name)
+    if not location:
+        return None
+    item = document_symbols(text).get(name, {})
+    return {"name": name, "kind": lsp_symbol_kind(item.get("kind", "function")), "uri": uri, "range": location["range"], "selectionRange": location["range"], "detail": item.get("signature") or item.get("type", "")}
+
+
 def handle(message: dict[str, Any]) -> bool:
+    global workspace_root
     method = message.get("method")
     params = message.get("params", {})
     request_id = message.get("id")
     if method == "initialize":
+        root_uri = params.get("rootUri")
+        if root_uri and root_uri.startswith("file://"):
+            workspace_root = Path(root_uri[7:])
         reply(request_id, {"capabilities": {
             "textDocumentSync": 1,
             "completionProvider": {"triggerCharacters": [".", ":"]},
@@ -710,6 +787,12 @@ def handle(message: dict[str, Any]) -> bool:
             "hoverProvider": True,
             "definitionProvider": True,
             "referencesProvider": True,
+            "documentSymbolProvider": True,
+            "workspaceSymbolProvider": True,
+            "documentFormattingProvider": True,
+            "renameProvider": True,
+            "codeActionProvider": {"codeActionKinds": ["quickfix", "source"]},
+            "callHierarchyProvider": True,
             "diagnosticProvider": {"interFileDependencies": True, "workspaceDiagnostics": False},
             "semanticTokensProvider": {"legend": {"tokenTypes": token_types, "tokenModifiers": ["deprecated"]}, "full": True},
         }})
@@ -755,6 +838,78 @@ def handle(message: dict[str, Any]) -> bool:
     elif method == "textDocument/semanticTokens/full":
         uri = params["textDocument"]["uri"]
         reply(request_id, {"data": semantic_tokens(documents.get(uri, ""))})
+    elif method == "textDocument/definition":
+        uri = params["textDocument"]["uri"]
+        text = documents.get(uri, "")
+        name = word_at(text, params["position"])
+        candidates = all_symbols().get(name, [])
+        location = symbol_location(candidates[0]["uri"], candidates[0]["text"], name) if candidates else None
+        reply(request_id, [location] if location else [])
+    elif method == "textDocument/references":
+        uri = params["textDocument"]["uri"]
+        text = documents.get(uri, "")
+        name = word_at(text, params["position"])
+        references = []
+        for candidate_uri, candidate_text in files_in_workspace().items():
+            for match in re.finditer(r"\\b" + re.escape(name) + r"\\b", candidate_text):
+                references.append({"uri": candidate_uri, "range": {"start": line_position(candidate_text, match.start()), "end": line_position(candidate_text, match.end())}})
+        reply(request_id, references)
+    elif method == "textDocument/documentSymbol":
+        uri = params["textDocument"]["uri"]
+        text = documents.get(uri, "")
+        result = []
+        for name, item in document_symbols(text).items():
+            location = symbol_location(uri, text, name)
+            if location:
+                result.append({"name": name, "kind": lsp_symbol_kind(item["kind"]), "detail": item["signature"] or item["type"], "range": location["range"], "selectionRange": location["range"]})
+        reply(request_id, result)
+    elif method == "workspace/symbol":
+        query = params.get("query", "").lower()
+        result = []
+        for name, candidates in all_symbols().items():
+            if query in name.lower():
+                candidate = candidates[0]
+                location = symbol_location(candidate["uri"], candidate["text"], name)
+                if location:
+                    result.append({"name": name, "kind": lsp_symbol_kind(candidate["item"]["kind"]), "location": location})
+        reply(request_id, result)
+    elif method == "textDocument/formatting":
+        uri = params["textDocument"]["uri"]
+        text = documents.get(uri, "")
+        reply(request_id, [{"range": full_document_range(text), "newText": format_document(text)}])
+    elif method == "textDocument/rename":
+        uri = params["textDocument"]["uri"]
+        text = documents.get(uri, "")
+        old_name = word_at(text, params["position"])
+        new_name = params["newName"]
+        changes = {}
+        for candidate_uri, candidate_text in files_in_workspace().items():
+            edits = [{"range": {"start": line_position(candidate_text, match.start()), "end": line_position(candidate_text, match.end())}, "newText": new_name} for match in re.finditer(r"\\b" + re.escape(old_name) + r"\\b", candidate_text)]
+            if edits:
+                changes[candidate_uri] = edits
+        reply(request_id, {"changes": changes})
+    elif method == "textDocument/codeAction":
+        uri = params["textDocument"]["uri"]
+        reply(request_id, code_actions(uri, documents.get(uri, "")))
+    elif method == "textDocument/prepareCallHierarchy":
+        uri = params["textDocument"]["uri"]
+        text = documents.get(uri, "")
+        name = word_at(text, params["position"])
+        item = call_hierarchy_item(uri, text, name)
+        reply(request_id, [item] if item else [])
+    elif method in ("callHierarchy/incomingCalls", "callHierarchy/outgoingCalls"):
+        item = params.get("item", {})
+        uri = item.get("uri", "")
+        name = item.get("name", "")
+        text = documents.get(uri, "")
+        calls = []
+        for match in re.finditer(r"\\b" + re.escape(name) + r"\\s*\\(", text):
+            range_ = {"start": line_position(text, match.start()), "end": line_position(text, match.end())}
+            if method.endswith("incomingCalls"):
+                calls.append({"from": {"name": name, "kind": 12, "uri": uri, "range": range_, "selectionRange": range_}, "fromRanges": [range_]})
+            else:
+                calls.append({"to": {"name": name, "kind": 12, "uri": uri, "range": range_, "selectionRange": range_}, "fromRanges": [range_]})
+        reply(request_id, calls)
     elif method == "shutdown":
         reply(request_id, None)
         return False
