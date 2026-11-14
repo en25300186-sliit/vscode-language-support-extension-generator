@@ -51,6 +51,8 @@ language = LanguageSpec(
         ),
         Symbol("UserId", kind="type", type="str", documentation="A user identifier."),
     ),
+    run_command="python ${file}",
+    test_command="python -m pytest",
 )
 
 VscodeExtensionBuilder(language).generate(Path("generated/mylang"))
@@ -165,7 +167,8 @@ extended with language-specific parsing and scope analysis.
 The generated scaffold includes:
 
 - `.vscode/launch.json` with a language debug configuration entry.
-- `.vscode/tasks.json` with run and test task placeholders.
+- `.vscode/tasks.json` with configurable `run_command` and `test_command`
+  commands.
 - A TypeScript client that starts and restarts the Python language server.
 - `embedded_languages`, mapped into the generated TextMate grammar's
   `embeddedLanguages` contribution for mixed-language files.
@@ -179,9 +182,10 @@ embedded_languages=(
 )
 ```
 
-The debug adapter, compiler, runner, and test commands are extension-specific
-integration points; replace the generated placeholders with the actual tools
-for the language.
+The debug adapter remains an extension-specific integration point: use the
+generated launch configuration as the DAP entry point and replace its
+language-specific adapter settings when needed. Runner and test commands are
+fully configurable in `language.py`.
 
 ## Generated files
 

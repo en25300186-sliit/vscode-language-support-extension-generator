@@ -110,6 +110,8 @@ class LanguageSpec:
     snippets: tuple["Snippet", ...] = ()
     symbols: tuple["Symbol", ...] = ()
     embedded_languages: tuple[tuple[str, str], ...] = ()
+    run_command: str = "python ${file}"
+    test_command: str = "python -m pytest"
 
 
 @dataclass(frozen=True)
@@ -280,6 +282,7 @@ class VscodeExtensionBuilder:
                                 "type": language_id,
                                 "request": "launch",
                                 "program": "${file}",
+                                "args": [],
                             }
                         ],
                     }
@@ -499,6 +502,8 @@ language = LanguageSpec(
     snippets={self.spec.snippets!r},
     symbols={self.spec.symbols!r},
     embedded_languages={self.spec.embedded_languages!r},
+    run_command={self.spec.run_command!r},
+    test_command={self.spec.test_command!r},
 )
 
 
@@ -527,14 +532,14 @@ if __name__ == "__main__":
                     "label": f"Run {self.spec.display_name} file",
                     "type": self.spec.language_id,
                     "task": "run",
-                    "command": "echo Run current file",
+                    "command": self.spec.run_command,
                     "group": "build",
                 },
                 {
                     "label": f"Test {self.spec.display_name}",
                     "type": self.spec.language_id,
                     "task": "test",
-                    "command": "echo Run tests",
+                    "command": self.spec.test_command,
                     "group": "test",
                 },
             ],
